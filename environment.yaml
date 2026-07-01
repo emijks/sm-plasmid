@@ -1,0 +1,12 @@
+---
+name: sm-plasmid
+
+channels:
+  - bioconda
+  - conda-forge
+
+dependencies:
+  - python==3.9.18
+  - pip>=22.2
+  - pip:
+      - -r requirements.txt

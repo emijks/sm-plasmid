@@ -1,0 +1,6 @@
+.cache
+.java
+.snakemake
+tmp
+*build
+*dist
