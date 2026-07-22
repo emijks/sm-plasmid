@@ -1,6 +1,11 @@
-<img width="863" height="638" alt="sm-plasmid" src="https://github.com/user-attachments/assets/02e2416a-00dc-40f8-8886-bdabe3657c78" />
+# Схема работы пайплайна
+<img width="863" height="638" alt="sm-plasmid" src="https://github.com/user-attachments/assets/78482900-6897-48e9-aa97-c01ad5d0a113" />
 
-# Пример запуска:
+Зеленое - входные данные; 
+желтое - промежуточные стадии;
+оранжевое - стадии, создающие репортируемые выходные файлы (обозначены **жирным шрифтом** в той же стадии).
+
+# Пример запуска
 ```
 cd sm-plasmid
 python3 plasmid.py -x path_to_xlsx -t path_to_tmp -s path_to_fastq -r path_to_ref -o path_to_results -f 2
