@@ -1,59 +1,27 @@
 #!/usr/bin/env python3
 
 import argparse
-import glob
+import sys
 from pathlib import Path
 
 import pandas as pd
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from samples import map_samples  # noqa: E402
+
 
 def get_samples(table, seq_dir, ref_dir, seq_format):
-
-    samples = []
-
-    raw_data = pd.read_excel(table)
-
-    for _, row in raw_data.iterrows():
-
-        ref_fname = str(row["Map_name"]).strip()
-
-        if seq_format == 1:
-            seq_prefix = (
-                f"{row['ID']}/"
-                f"{row['Folder']}/"
-                f"{row['Sample']}"
-            )
-        else:
-            seq_prefix = str(row["Sample"])
-
-
-        ref_ok = (
-            Path(ref_dir) / ref_fname
-        ).exists()
-
-
-        # Раньше на образец приходилась ровно одна пара (2 файла: R1+R2).
-        # Теперь может прийти N лейнов -> N файлов R1 + N файлов R2 (N >= 1).
-        r1_files = glob.glob(f"{seq_dir}/{seq_prefix}*R1*")
-        r2_files = glob.glob(f"{seq_dir}/{seq_prefix}*R2*")
-        fastq_ok = (
-            bool(r1_files)
-            and bool(r2_files)
-            and len(r1_files) == len(r2_files)
-        )
-
-
-        samples.append(
-            {
-                "sample": seq_prefix,
-                "reference":
-                    "OK" if ref_ok else "MISSING",
-                "fastq":
-                    "OK" if fastq_ok else "MISSING",
-            }
-        )
-
-    return samples
+    # те же правила сопоставления, что и в Snakefile (scripts/samples.py)
+    return [
+        {
+            "sample": rec["name"],
+            "order": rec["order"] or "-",
+            "out_key": rec["out_key"],
+            "reference": "OK" if rec["ref_ok"] else "MISSING",
+            "fastq": "OK" if rec["fastq_ok"] else "MISSING",
+        }
+        for rec in map_samples(table, seq_dir, ref_dir, seq_format)
+    ]
 
 
 
@@ -203,6 +171,129 @@ def skipped():
 
 
 
+def make_status_table(table, seq_dir, ref_dir, seq_format, out_dir, output):
+    """Строит статус-таблицу и записывает её в output (TSV). Возвращает DataFrame."""
+
+    samples = get_samples(
+        table,
+        seq_dir,
+        ref_dir,
+        seq_format
+    )
+
+
+    out_dir = Path(out_dir)
+
+    rows = []
+
+
+    for sample in samples:
+
+        name = sample["sample"]
+        key = sample["out_key"]  # <OrderID>/<имя образца>, как в Snakefile
+
+
+        row = {
+
+            "sample": name,
+
+            "order":
+                sample["order"],
+
+            "reference":
+                sample["reference"],
+
+            "fastq":
+                sample["fastq"],
+
+        }
+
+
+        if (
+            sample["reference"] != "OK"
+            or sample["fastq"] != "OK"
+        ):
+
+            row.update(
+                skipped()
+            )
+
+
+        else:
+
+            variant_result = check_vcf(
+                out_dir /
+                f"{key}.vcf"
+            )
+
+
+            row.update(
+                {
+
+                    "assembly":
+                        check_fasta(
+                            out_dir /
+                            f"{key}.assembly.fasta"
+                        ),
+
+
+                    "bam":
+                        check_bam(
+                            out_dir /
+                            f"{key}.bam"
+                        ),
+
+
+                    "bam_index":
+                        check_file(
+                            out_dir /
+                            f"{key}.bam.bai"
+                        ),
+
+
+                    "variant_calling":
+                        variant_result["status"],
+
+
+                    "snp_count":
+                        variant_result["snps"],
+
+
+                    "indel_count":
+                        variant_result["indels"],
+
+
+                    "consensus":
+                        check_fasta(
+                            out_dir /
+                            f"{key}.consensus.fasta"
+                        ),
+
+
+                    "report":
+                        check_file(
+                            out_dir /
+                            f"{key}.report.html"
+                        ),
+                }
+            )
+
+
+        rows.append(row)
+
+
+    df = pd.DataFrame(rows)
+
+
+    df.to_csv(
+        output,
+        sep="\t",
+        index=False
+    )
+
+    return df
+
+
 def main():
 
     parser = argparse.ArgumentParser()
@@ -243,117 +334,13 @@ def main():
     args = parser.parse_args()
 
 
-    samples = get_samples(
+    make_status_table(
         args.table,
         args.seq_dir,
         args.ref_dir,
-        args.seq_format
-    )
-
-
-    out_dir = Path(args.out_dir)
-
-    rows = []
-
-
-    for sample in samples:
-
-        name = sample["sample"]
-
-
-        row = {
-
-            "sample": name,
-
-            "reference":
-                sample["reference"],
-
-            "fastq":
-                sample["fastq"],
-
-        }
-
-
-        if (
-            sample["reference"] != "OK"
-            or sample["fastq"] != "OK"
-        ):
-
-            row.update(
-                skipped()
-            )
-
-
-        else:
-
-            variant_result = check_vcf(
-                out_dir /
-                f"{name}.vcf"
-            )
-
-
-            row.update(
-                {
-
-                    "assembly":
-                        check_fasta(
-                            out_dir /
-                            f"{name}.assembly.fasta"
-                        ),
-
-
-                    "bam":
-                        check_bam(
-                            out_dir /
-                            f"{name}.bam"
-                        ),
-
-
-                    "bam_index":
-                        check_file(
-                            out_dir /
-                            f"{name}.bam.bai"
-                        ),
-
-
-                    "variant_calling":
-                        variant_result["status"],
-
-
-                    "snp_count":
-                        variant_result["snps"],
-
-
-                    "indel_count":
-                        variant_result["indels"],
-
-
-                    "consensus":
-                        check_fasta(
-                            out_dir /
-                            f"{name}.consensus.fasta"
-                        ),
-
-
-                    "report":
-                        check_file(
-                            out_dir /
-                            f"{name}.report.html"
-                        ),
-                }
-            )
-
-
-        rows.append(row)
-
-
-    df = pd.DataFrame(rows)
-
-
-    df.to_csv(
-        args.output,
-        sep="\t",
-        index=False
+        args.seq_format,
+        args.out_dir,
+        args.output
     )
 
 
