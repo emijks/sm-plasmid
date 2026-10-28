@@ -32,13 +32,14 @@ def get_samples(table, seq_dir, ref_dir, seq_format):
         ).exists()
 
 
+        # Раньше на образец приходилась ровно одна пара (2 файла: R1+R2).
+        # Теперь может прийти N лейнов -> N файлов R1 + N файлов R2 (N >= 1).
+        r1_files = glob.glob(f"{seq_dir}/{seq_prefix}*R1*")
+        r2_files = glob.glob(f"{seq_dir}/{seq_prefix}*R2*")
         fastq_ok = (
-            len(
-                glob.glob(
-                    f"{seq_dir}/{seq_prefix}*"
-                )
-            )
-            == 2
+            bool(r1_files)
+            and bool(r2_files)
+            and len(r1_files) == len(r2_files)
         )
 
 

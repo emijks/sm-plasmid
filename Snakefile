@@ -32,9 +32,18 @@ def map_input() -> pd.DataFrame:
         if not Path(f'{ref_dir}/{ref_fname}').exists():
             print(f'Reference "{ref_fname}" not found in "{ref_dir}"')
             continue
-        if not len(glob.glob(f'{seq_dir}/{seq_prefix}*')) == 2:
-            print(f'Sequence "{seq_prefix}" not found as pair in "{seq_dir}"')
+
+        # Раньше на образец приходилась ровно одна пара (2 файла: R1+R2).
+        # Теперь может прийти N лейнов -> N файлов R1 + N файлов R2 (N >= 1).
+        r1_files = sorted(glob.glob(f'{seq_dir}/{seq_prefix}*R1*'))
+        r2_files = sorted(glob.glob(f'{seq_dir}/{seq_prefix}*R2*'))
+        if not r1_files or not r2_files or len(r1_files) != len(r2_files):
+            print(
+                f'Sequence "{seq_prefix}" not found as matched R1/R2 lanes in "{seq_dir}" '
+                f'(found {len(r1_files)} R1 and {len(r2_files)} R2 files)'
+            )
             continue
+
         input_map_data.append({
             'ref_prefix': ref_prefix,
             'seq_prefix': seq_prefix
@@ -48,9 +57,9 @@ if input_map.empty:
     sys.exit('Nothing to process')
 
 
-def get_seq(suffix_pattern: str, wildcards: snakemake.io.Wildcards) -> str:
-    seq = glob.glob(f'{seq_dir}/{wildcards.seq_prefix}{suffix_pattern}')
-    return seq[0]
+def get_seq_lanes(suffix_pattern: str, wildcards: snakemake.io.Wildcards) -> list:
+    """Возвращает отсортированный список всех файлов-лейнов под паттерн (R1 или R2)."""
+    return sorted(glob.glob(f'{seq_dir}/{wildcards.seq_prefix}{suffix_pattern}'))
 
 
 def get_ref(suffix: str, wildcards: snakemake.io.Wildcards) -> str:
@@ -113,12 +122,42 @@ rule bwa_index:
         '''
 
 
+rule faidx:
+    threads: 1
+    singularity: 'docker://kazakovaem/plasmid:1.0.0'
+    input:
+        ref_fa = tmp_dir + '/{ref_prefix}.fa',
+    output:
+        ref_fai = tmp_dir + '/{ref_prefix}.fa.fai',
+    shell:
+        '''
+        samtools faidx "{input.ref_fa}"
+        '''
+
+
+rule concat_lanes:
+    threads: 1
+    singularity: 'docker://kazakovaem/plasmid:1.0.0'
+    input:
+        r1 = lambda wildcards: get_seq_lanes('*R1*', wildcards),
+        r2 = lambda wildcards: get_seq_lanes('*R2*', wildcards),
+    output:
+        r1 = tmp_dir + '/{seq_prefix}_R1_concat.fq.gz',
+        r2 = tmp_dir + '/{seq_prefix}_R2_concat.fq.gz',
+    shell:
+        '''
+        mkdir -p "$(dirname "{output.r1}")"
+        cat {input.r1} > "{output.r1}"
+        cat {input.r2} > "{output.r2}"
+        '''
+
+
 rule fastqc:
     threads: 1
     singularity: 'docker://kazakovaem/plasmid:1.0.0'
     input:
-        r1 = lambda wildcards: get_seq('*R1*', wildcards),
-        r2 = lambda wildcards: get_seq('*R2*', wildcards),
+        r1 = rules.concat_lanes.output.r1,
+        r2 = rules.concat_lanes.output.r2,
     output:
         zip1  = temp(out_dir + '/{seq_prefix}.R1.fastqc.zip'),
         zip2  = temp(out_dir + '/{seq_prefix}.R2.fastqc.zip'),
@@ -137,15 +176,16 @@ rule trim:
     threads: 1
     singularity: 'docker://kazakovaem/plasmid:1.0.0'
     input:
-        r1 = lambda wildcards: get_seq('*R1*', wildcards),
-        r2 = lambda wildcards: get_seq('*R2*', wildcards),
+        r1 = rules.concat_lanes.output.r1,
+        r2 = rules.concat_lanes.output.r2,
     output:
         r1p = temp(out_dir + '/{seq_prefix}_R1_paired.fq.gz'),
         r1u = temp(out_dir + '/{seq_prefix}_R1_unpaired.fq.gz'),
         r2p = temp(out_dir + '/{seq_prefix}_R2_paired.fq.gz'),
         r2u = temp(out_dir + '/{seq_prefix}_R2_unpaired.fq.gz'),
     params:
-        adapters = 'references/TruSeq-illumina-PE.fa:2:30:10'
+        adapters = 'references/TruSeq-illumina-PE.fa:2:30:10',
+        minlen = 25
     shell:
         '''
         trimmomatic PE -threads {threads} \
@@ -156,7 +196,7 @@ rule trim:
             "{output.r2p}" \
             "{output.r2u}" \
             ILLUMINACLIP:{params.adapters} \
-            LEADING:10 TRAILING:10 SLIDINGWINDOW:4:20 MINLEN:50
+            LEADING:10 TRAILING:10 SLIDINGWINDOW:4:20 MINLEN:{params.minlen}
         '''
 
 
@@ -190,6 +230,7 @@ rule call:
     input:
         bam = rules.align.output.bam,
         ref_fa = lambda wildcards: get_ref(".fa", wildcards),
+        ref_fai = lambda wildcards: get_ref('.fa.fai', wildcards),
     output:
         vcf = out_dir + "/{seq_prefix}.vcf",
     shell:
@@ -214,6 +255,7 @@ rule consensus:
         vcf = rules.call.output.vcf,
         bam = rules.align.output.bam,
         ref_fa = lambda wildcards: get_ref('.fa', wildcards),
+        ref_fai = lambda wildcards: get_ref('.fa.fai', wildcards)
     output:
         fa = out_dir + '/{seq_prefix}.consensus.fasta'
     shell:
@@ -252,6 +294,7 @@ rule igv:
         bam = rules.align.output.bam,
         vcf = rules.call.output.vcf,
         ref_fa = lambda wildcards: get_ref('.fa', wildcards),
+        ref_fai = lambda wildcards: get_ref('.fa.fai', wildcards)
     output:
         txt = temp(out_dir + '/{seq_prefix}.igv.png.txt'),
         png = temp(out_dir + '/{seq_prefix}.igv.png')
@@ -272,6 +315,7 @@ rule report:
         bai = rules.align.output.bai,
         png = rules.igv.output.png,
         ref_fa = lambda wildcards: get_ref('.fa', wildcards),
+        ref_fai = lambda wildcards: get_ref('.fa.fai', wildcards)
     output:
         html = out_dir + '/{seq_prefix}.report.html'
     shell:

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 export PREFIX="$1"
 export BAM="$2"
 export VCF="$3"

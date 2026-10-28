@@ -15,7 +15,8 @@ if __name__ == '__main__':
     argparser.add_argument('-o', '--out-dir', required=True)
     argparser.add_argument('-t', '--tmp-dir', default='./tmp')
     argparser.add_argument('-@', '--threads', type=int, default=4)
-    argparser.add_argument('-f', '--seq-format', type=int, default=1, help='heeelp')
+    argparser.add_argument('-f', '--seq-format', type=int, default=2, help='heeelp')
+    argparser.add_argument('-l', '--trim-min-len', type=int, default=50)
     argparser.add_argument('-d', '--dry-run', action='count', default=0)
     args = argparser.parse_args()
 
@@ -23,23 +24,26 @@ if __name__ == '__main__':
 
 
     try:
-        sucess = snakemake.snakemake(
-        snakefile='Snakefile',
-        config=config,
-        cores=config['threads'],
-        use_singularity=True,
-        singularity_args=f"-B {args.seq_dir}:{args.seq_dir}:ro\
-                           -B {args.ref_dir}:{args.ref_dir}:ro\
-                           -B {args.tmp_dir}:{args.tmp_dir}:rw\
-                           -B {args.out_dir}:{args.out_dir}:rw\
-                           -B {args.table}:{args.table}:ro",
-        dryrun=bool(args.dry_run),
-        keepgoing=True,
-        keep_incomplete=True,
-        force_incomplete=True,
-        #printshellcmds=True,
-        quiet=True
-    )
+        snakemake.snakemake(
+            snakefile='Snakefile',
+            config=config,
+            cores=config['threads'],
+            use_singularity=True,
+            singularity_args=(
+                f"-B {args.seq_dir}:{args.seq_dir}:ro "
+                f"-B {args.ref_dir}:{args.ref_dir}:ro "
+                f"-B {args.tmp_dir}:{args.tmp_dir}:rw "
+                f"-B {args.out_dir}:{args.out_dir}:rw "
+                f"-B {args.table}:{args.table}:ro "
+            ),
+            dryrun=bool(args.dry_run),
+            keepgoing=True,
+            keep_incomplete=True,
+            force_incomplete=True,
+            # printshellcmds=True,
+            quiet=True,
+            # rerun_triggers=['input'],
+        )
     finally:
         if not args.dry_run:
             subprocess.run(
