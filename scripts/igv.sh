@@ -1,62 +1,51 @@
 #!/bin/bash
+# igv.sh WORKDIR BAM VCF REF PNG
+# Все промежуточные файлы (ссылки на входы, batch-файл, настройки IGV) — в WORKDIR;
+# при успешном завершении WORKDIR удаляется.
 set -euo pipefail
 
-TMP_DIR="$1"
-SEQ_PREFIX="$2"
-BAM="$3"
-VCF="$4"
-REF="$5"
-PNG="$6"
+WORKDIR="$1"
+BAM="$2"
+VCF="$3"
+REF="$4"
+PNG="$5"
 
-TMP_SEQDIR="$TMP_DIR/$(dirname "$SEQ_PREFIX")"
-TMP_SEQNAME="$(basename "$SEQ_PREFIX")"
-TMP_SEQNAME="${TMP_SEQNAME// /_}"
-TMP_REFNAME="$(basename "$REF")"
-TMP_REFNAME="${TMP_REFNAME// /_}"
+rm -rf "$WORKDIR"
+mkdir -p "$WORKDIR"
 
-mkdir -p "$TMP_SEQDIR"
+# IGV batch не любит пробелы в путях: даём входам простые имена через ссылки
+ln -s "$(realpath "$BAM")" "$WORKDIR/sample.bam"
+ln -s "$(realpath "$BAM.bai")" "$WORKDIR/sample.bam.bai"
+ln -s "$(realpath "$VCF")" "$WORKDIR/sample.vcf"
+ln -s "$(realpath "$REF")" "$WORKDIR/reference.fa"
+ln -s "$(realpath "$REF.fai")" "$WORKDIR/reference.fa.fai"
 
-safe_cp() {
-    src="$1"
-    dst="$2"
-
-    if [ "$(realpath "$src")" != "$(realpath -m "$dst")" ]; then
-        cp "$src" "$dst"
-    fi
-}
-
-safe_cp "$BAM" "$TMP_SEQDIR/$TMP_SEQNAME.bam"
-safe_cp "$BAM.bai" "$TMP_SEQDIR/$TMP_SEQNAME.bam.bai"
-safe_cp "$VCF" "$TMP_SEQDIR/$TMP_SEQNAME.vcf"
-safe_cp "$REF" "$TMP_SEQDIR/$TMP_REFNAME"
-safe_cp "$REF.fai" "$TMP_SEQDIR/$TMP_REFNAME.fai"
-
-cat <<EOF_BATCH > "${PNG}.txt"
-genome $TMP_SEQDIR/$TMP_REFNAME
-load $TMP_SEQDIR/$TMP_SEQNAME.bam
-load $TMP_SEQDIR/$TMP_SEQNAME.vcf
+cat <<EOF_BATCH > "$WORKDIR/igv_batch.txt"
+genome $WORKDIR/reference.fa
+load $WORKDIR/sample.bam
+load $WORKDIR/sample.vcf
 
 colorBy READ_STRAND
 collapse
 squish
 setTrackHeight 25
 maxPanelHeight 850
-snapshotDirectory $TMP_SEQDIR
-snapshot $TMP_SEQNAME.igv.png
+snapshotDirectory $WORKDIR
+snapshot igv.png
 exit
 EOF_BATCH
 
-cat "${PNG}.txt"
+cat "$WORKDIR/igv_batch.txt"
 
 xvfb-run \
   --auto-servernum \
   --server-args='-screen 1, 10000x1600x24' \
-  java -Duser.home="${TMP_DIR}" \
+  java -Duser.home="$WORKDIR" \
       -showversion \
       --module-path="/IGV_2.16.2/lib" \
       -Xmx8g @"/IGV_2.16.2/igv.args" \
-      --module=org.igv/org.broad.igv.ui.Main "$@" \
-      --batch "${PNG}.txt"
+      --module=org.igv/org.broad.igv.ui.Main \
+      --batch "$WORKDIR/igv_batch.txt"
 
-safe_cp "$TMP_SEQDIR/$TMP_SEQNAME.igv.png" "$TMP_DIR/$SEQ_PREFIX.igv.png"
-safe_cp "$TMP_SEQDIR/$TMP_SEQNAME.igv.png" "$PNG"
+mv "$WORKDIR/igv.png" "$PNG"
+rm -rf "$WORKDIR"

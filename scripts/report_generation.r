@@ -173,7 +173,8 @@ extract_fastqc_plots <- function(zip_file, read_label, out_dir) {
 
   if (length(plot_members) == 0) return(out_empty)
 
-  plot_dir <- file.path(out_dir, paste0("fastqc_plots_", read_label))
+  # имя образца в каталоге: графики разных образцов не должны пересекаться
+  plot_dir <- file.path(out_dir, paste0(seq, "_fastqc_plots_", read_label))
   dir.create(plot_dir, showWarnings = FALSE, recursive = TRUE)
 
   rows <- lapply(plot_members, function(member) {
