@@ -12,10 +12,10 @@ from samples import map_samples  # noqa: E402  (общий модуль со scr
 
 seq_dir = str(Path(config['seq_dir']).resolve().absolute())   # только чтение
 ref_dir = str(Path(config['ref_dir']).resolve().absolute())   # только чтение
-tmp_dir = str(Path(config['tmp_dir']).resolve().absolute())   # промежуточные файлы
+tmp_dir = str(Path(config['tmp_dir']).resolve().absolute())   # каталог прогона (plasmid.py)
 out_dir = str(Path(config['out_dir']).resolve().absolute())   # только результаты
 
-# Раскладка tmp_dir:
+# Раскладка tmp_dir (каталога прогона <tmp-dir>/sm-plasmid-<хеш пути -o>/):
 #   refs/{ref_prefix}.fa*            — копия/конвертация референса и индексы (temp)
 #   samples/{sample}/...         — промежуточные файлы образца (temp)
 #   samples/{sample}/<rule>.work — рабочий каталог правила, удаляется в конце правила
@@ -73,13 +73,13 @@ def get_ref(suffix: str, wildcards) -> str:
 
 
 # Логи инструментов: вывод (stdout+stderr) каждого правила всегда пишется в его
-# лог-файл; без --quiet-tools он дублируется в stdout. Сообщения Snakemake и
+# лог-файл; с --verbose-tools он дублируется в stdout. Сообщения Snakemake и
 # обвязки (plasmid.py, таблица запуска) идут в stdout всегда.
 #   <out-dir>/logs/<OrderID>/<имя образца>/<rule>.log
 #   <out-dir>/logs/refs/<ref_prefix>/<rule>.log
 #   <out-dir>/logs/summary_table.log
 log_dir = out_dir + '/logs'
-if config.get('quiet_tools'):
+if config.get('quiet_tools', True):
     LOG = 'exec > "{log}" 2>&1\n'
 else:
     LOG = 'exec > >(tee "{log}") 2>&1\n'
@@ -233,7 +233,7 @@ rule trim:
         r2u = temp(smp_tmp + '/{sample}/R2.unpaired.fq.gz'),
     params:
         adapters = 'references/TruSeq-illumina-PE.fa:2:30:10',
-        minlen = config.get('trim_min_len', 50),
+        minlen = config.get('trim_min_len', 25),
     log:
         sample_log('trim')
     shell:
