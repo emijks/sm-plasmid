@@ -15,7 +15,7 @@ ref_dir = str(Path(config['ref_dir']).resolve().absolute())   # только ч�
 tmp_dir = str(Path(config['tmp_dir']).resolve().absolute())   # каталог прогона (plasmid.py)
 out_dir = str(Path(config['out_dir']).resolve().absolute())   # только результаты
 
-# Раскладка tmp_dir (каталога прогона <tmp-dir>/sm-plasmid-<дата-время>-<суффикс>/):
+# Раскладка tmp_dir (каталога прогона <tmp-dir>/sm-plasmid-<хеш пути -o>/):
 #   refs/{ref_prefix}.fa*            — копия/конвертация референса и индексы (temp)
 #   samples/{sample}/...         — промежуточные файлы образца (temp)
 #   samples/{sample}/<rule>.work — рабочий каталог правила, удаляется в конце правила
