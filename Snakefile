@@ -233,7 +233,7 @@ rule trim:
         r2u = temp(smp_tmp + '/{sample}/R2.unpaired.fq.gz'),
     params:
         adapters = 'references/TruSeq-illumina-PE.fa:2:30:10',
-        minlen = config.get('trim_min_len', 50),
+        minlen = config.get('trim_min_len', 25),
     log:
         sample_log('trim')
     shell:

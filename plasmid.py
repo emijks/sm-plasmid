@@ -128,14 +128,17 @@ if __name__ == '__main__':
         )
     finally:
         if not args.dry_run:
-            make_status_table(
+            status_path = out_dir / 'pipeline_status.tsv'
+            status = make_status_table(
                 table=str(table),
                 seq_dir=str(seq_dir),
                 ref_dir=str(ref_dir),
                 seq_format=args.seq_format,
                 out_dir=str(out_dir),
-                output=str(out_dir / 'pipeline_status.tsv'),
+                output=str(status_path),
             )
+            print(f'\nPipeline status ({status_path}):', flush=True)
+            print(status.to_string(index=False) if not status.empty else 'No samples in the table', flush=True)
 
     if not args.dry_run:
         if success:
