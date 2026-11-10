@@ -2,3 +2,4 @@
 .java
 .snakemake
 tmp
+__pycache__
