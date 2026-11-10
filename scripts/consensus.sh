@@ -31,6 +31,17 @@ bcftools index "$WORKDIR/variants.vcf.gz"
 # Маска задаётся в координатах референса, поэтому применяется внутри
 # bcftools consensus (-m), а не после него: после инделов координаты
 # консенсуса сдвигаются относительно референса.
+
+echo "Порог покрытия: $THRESH_COV" >&2
+echo "Замаскировано интервалов: $(wc -l < "$WORKDIR/lowcov.bed"), bp: $(awk '{s+=$3-$2} END{print s+0}' "$WORKDIR/lowcov.bed")" >&2
+
+# Какие варианты попадут под маску
+MASKED=$(bcftools view -H -T "$WORKDIR/lowcov.bed" "$WORKDIR/variants.vcf.gz" | cut -f1,2,4,5)
+if [ -n "$MASKED" ]; then
+    echo "ВНИМАНИЕ: варианты под маской низкого покрытия (будут заменены на N):" >&2
+    echo "$MASKED" >&2
+fi
+
 bcftools consensus -f "$REF" -m "$WORKDIR/lowcov.bed" "$WORKDIR/variants.vcf.gz" > "$WORKDIR/consensus.fa"
 
 mv "$WORKDIR/consensus.fa" "$CONS"
