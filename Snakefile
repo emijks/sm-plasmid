@@ -5,6 +5,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(workflow.basedir) / 'scripts'))
 from samples import map_samples  # noqa: E402  (общий модуль со scripts/make_status_table.py)
+from ref2fa import FORMATS as REF_FORMATS, ref_format  # noqa: E402  (Biopython здесь не нужен)
 
 
 # # ============== utils ============================
@@ -16,7 +17,8 @@ tmp_dir = str(Path(config['tmp_dir']).resolve().absolute())   # каталог �
 out_dir = str(Path(config['out_dir']).resolve().absolute())   # только результаты
 
 # Раскладка tmp_dir (каталога прогона <tmp-dir>/sm-plasmid-<хеш пути -o>/):
-#   refs/{ref_prefix}.fa*            — копия/конвертация референса и индексы (temp)
+#   refs/{ref_fname}.fa*         — референс в FASTA и индексы (temp), ключ — имя файла
+#                                  референса целиком: pX.dna -> refs/pX.dna.fa, pX.gbk -> refs/pX.gbk.fa
 #   samples/{sample}/...         — промежуточные файлы образца (temp)
 #   samples/{sample}/<rule>.work — рабочий каталог правила, удаляется в конце правила
 # Wildcard {sample} — путь результатов относительно out_dir: <OrderID>/<имя образца>
@@ -39,10 +41,10 @@ def map_input() -> pd.DataFrame:
         if rec['order'] is None:
             problems.append(f'{rec["name"]}: warning: order not recognized in sample name '
                             f'(expected <RunID>_SEQ-<N>-<item>_<SampleID>), results go to "{out_dir}/{rec["out_key"]}.*"')
-        # ruleorder dna2fa > fa2fa: при наличии обоих файлов используется .dna
-        if Path(rec['ref_fname']).suffix == '.fa' and Path(f'{ref_dir}/{rec["ref_prefix"]}.dna').exists():
-            problems.append(f'{rec["name"]}: warning: "{rec["ref_fname"]}" requested, but "{rec["ref_prefix"]}.dna" '
-                            f'exists in "{ref_dir}" and will be used instead (ruleorder: dna2fa > fa2fa)')
+        if ref_format(rec['ref_fname']) is None:
+            problems.append(f'{rec["name"]}: reference "{rec["ref_fname"]}" has unsupported format, '
+                            f'expected one of: {", ".join(REF_FORMATS)}')
+            continue
         input_map_data.append({**rec, 'sample': rec['out_key']})
     input_map = pd.DataFrame(input_map_data, columns=['sample', 'name', 'order', 'ref_fname', 'ref_prefix', 'r1', 'r2'])
 
@@ -69,14 +71,14 @@ def get_sample(wildcards) -> pd.Series:
 
 
 def get_ref(suffix: str, wildcards) -> str:
-    return f'{ref_tmp}/{get_sample(wildcards)["ref_prefix"]}{suffix}'
+    return f'{ref_tmp}/{get_sample(wildcards)["ref_fname"]}{suffix}'
 
 
 # Логи инструментов: вывод (stdout+stderr) каждого правила всегда пишется в его
 # лог-файл; с --verbose-tools он дублируется в stdout. Сообщения Snakemake и
 # обвязки (plasmid.py, таблица запуска) идут в stdout всегда.
 #   <out-dir>/logs/<OrderID>/<имя образца>/<rule>.log
-#   <out-dir>/logs/refs/<ref_prefix>/<rule>.log
+#   <out-dir>/logs/refs/<ref_fname>/<rule>.log
 #   <out-dir>/logs/summary_table.log
 log_dir = out_dir + '/logs'
 if config.get('quiet_tools', True):
@@ -90,7 +92,7 @@ def sample_log(rule_name: str) -> str:
 
 
 def ref_log(rule_name: str) -> str:
-    return log_dir + '/refs/{ref_prefix}/' + rule_name + '.log'
+    return log_dir + '/refs/{ref_fname}/' + rule_name + '.log'
 
 
 def work_dir(rule_name: str) -> str:
@@ -101,7 +103,8 @@ def work_dir(rule_name: str) -> str:
 # # ============== rules ============================
 
 
-ruleorder: dna2fa > fa2fa
+wildcard_constraints:
+    ref_fname = r'[^/]+',
 
 
 rule all:
@@ -114,33 +117,20 @@ rule all:
         out_dir + '/summary.tsv'
 
 
-rule dna2fa:
+rule ref2fa:
+    """Любой поддерживаемый референс (.dna, .gbk, .fa, ... — см. scripts/ref2fasta.py) -> FASTA.
+    Используется ровно тот файл, что указан в таблице, поэтому ruleorder не нужен."""
     threads: 1
     singularity: 'docker://kazakovaem/plasmid:1.0.0'
     input:
-        ref_dna = ref_dir + '/{ref_prefix}.dna',
+        ref = ref_dir + '/{ref_fname}',
     output:
-        ref_fa = temp(ref_tmp + '/{ref_prefix}.fa')
+        ref_fa = temp(ref_tmp + '/{ref_fname}.fa')
     log:
-        ref_log('dna2fa')
+        ref_log('ref2fa')
     shell:
         LOG + '''
-        python3 scripts/dna2fasta.py "{input.ref_dna}" "{output.ref_fa}"
-        '''
-
-
-rule fa2fa:
-    threads: 1
-    singularity: 'docker://kazakovaem/plasmid:1.0.0'
-    input:
-        ref_fa = ref_dir + '/{ref_prefix}.fa',
-    output:
-        ref_fa = temp(ref_tmp + '/{ref_prefix}.fa')
-    log:
-        ref_log('fa2fa')
-    shell:
-        LOG + '''
-        cp "{input.ref_fa}" "{output.ref_fa}"
+        python3 scripts/ref2fa.py "{input.ref}" "{output.ref_fa}"
         '''
 
 
@@ -148,13 +138,13 @@ rule bwa_index:
     threads: 1
     singularity: 'docker://kazakovaem/plasmid:1.0.0'
     input:
-        ref_fa = ref_tmp + '/{ref_prefix}.fa',
+        ref_fa = ref_tmp + '/{ref_fname}.fa',
     output:
-        ref_0123 = temp(ref_tmp + '/{ref_prefix}.fa.0123'),
-        ref_amb = temp(ref_tmp + '/{ref_prefix}.fa.amb'),
-        ref_ann = temp(ref_tmp + '/{ref_prefix}.fa.ann'),
-        ref_bwt = temp(ref_tmp + '/{ref_prefix}.fa.bwt.2bit.64'),
-        ref_pac = temp(ref_tmp + '/{ref_prefix}.fa.pac'),
+        ref_0123 = temp(ref_tmp + '/{ref_fname}.fa.0123'),
+        ref_amb = temp(ref_tmp + '/{ref_fname}.fa.amb'),
+        ref_ann = temp(ref_tmp + '/{ref_fname}.fa.ann'),
+        ref_bwt = temp(ref_tmp + '/{ref_fname}.fa.bwt.2bit.64'),
+        ref_pac = temp(ref_tmp + '/{ref_fname}.fa.pac'),
     log:
         ref_log('bwa_index')
     shell:
@@ -167,9 +157,9 @@ rule faidx:
     threads: 1
     singularity: 'docker://kazakovaem/plasmid:1.0.0'
     input:
-        ref_fa = ref_tmp + '/{ref_prefix}.fa',
+        ref_fa = ref_tmp + '/{ref_fname}.fa',
     output:
-        ref_fai = temp(ref_tmp + '/{ref_prefix}.fa.fai'),
+        ref_fai = temp(ref_tmp + '/{ref_fname}.fa.fai'),
     log:
         ref_log('faidx')
     shell:
